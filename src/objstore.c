@@ -209,7 +209,7 @@ static void do_process(conn_t *c) {
 
 	if (cmd != '?') { /* valid command, read key + obj */
 	    obj_len_t lTotal = lKey + lObj + 1, l = 0;
-	    entry_t *e = calloc(1, sizeof(e) + lKey + lObj + 1);
+	    entry_t *e = calloc(1, sizeof(entry_t) + lKey + lObj + 1);
 	    if (!e) {
 		fprintf(stderr, "ERROR: out of memory when allocating for %ld + %ld\n", (long) lKey, (long) lObj);
 		break;
