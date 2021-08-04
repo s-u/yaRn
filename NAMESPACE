@@ -1,0 +1,4 @@
+useDynLib(yaRn, C_get, C_put, C_start, C_ask)
+export(osrv.start, osrv.ask)
+export(os.pop, os.push)
+export(yarn)
