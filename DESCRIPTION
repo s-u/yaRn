@@ -1,0 +1,8 @@
+Package: yaRn
+Version: 0.1-0
+Title: Yarn client for using R on a Hadoop cluster
+Author: Simon Urbanek <Simon.Urbanek@r-project.org>
+Maintainer: Simon Urbanek <Simon.Urbanek@r-project.org>
+Description: Hadoop Yarn.
+License: GPL-2 | GPL-3
+URL: http://github.com/s-u/yaRn
