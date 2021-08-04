@@ -281,8 +281,9 @@ typedef struct {
 
 typedef unsigned long int obj_len_t;
 
-typedef struct entry_s {
-    struct entry_s *next;
+typedef struct hash_elt {
+    const char *key_ptr; /* for hash */
+    struct hash_elt *next;
     obj_len_t len;
     void *obj;
     char key[1];
@@ -290,26 +291,36 @@ typedef struct entry_s {
 
 static pthread_mutex_t obj_mutex;
 
+/* hash API */
+typedef struct hash hash_t;
+typedef struct hash_elt hash_elt_t;
+typedef unsigned int hash_value_t;
+
+hash_t *new_hash(hash_value_t len, double max_load);
+hash_elt_t *hash(hash_t *h, const char *key, hash_elt_t *val, int rm);
+
 /* FIXME: use hash */
-static entry_t *obj_root;
+static hash_t  *obj_hash;
 static entry_t *obj_gc_pool;
 
 static void obj_add_buf(const char *key, void *data, obj_len_t len) {
     entry_t *e = (entry_t*) calloc(1, sizeof(entry_t) + strlen(key));
     strcpy(e->key, key);
+    e->key_ptr = e->key;
     e->len = len;
     e->obj = data;
     pthread_mutex_lock(&obj_mutex);
-    e->next = obj_root;
-    obj_root = e;
+    e->next = (entry_t*) hash(obj_hash, key, (hash_elt_t*)e, 0);
+    if (e->next == e) e->next = 0; /* no loops */
     pthread_mutex_unlock(&obj_mutex);
 }
 
 /* NOTE: the ownership is transferred ! */
 static void obj_add(entry_t *e) {
     pthread_mutex_lock(&obj_mutex);
-    e->next = obj_root;
-    obj_root = e;
+    e->key_ptr = e->key; /* make sure the object is complete */
+    e->next = (entry_t*) hash(obj_hash, e->key, (hash_elt_t*)e, 0);
+    if (e->next == e) e->next = 0; /* no loops */
     pthread_mutex_unlock(&obj_mutex);
 }
 
@@ -324,24 +335,25 @@ static void obj_gc() {
 }
 
 static entry_t *obj_get(const char *key, int rm) {
-    entry_t *e = obj_root, *prev = 0;
-    /* FIXME: this is conservative, can we reduce the region? */
     pthread_mutex_lock(&obj_mutex);
-    while (e) {
-	if (!strcmp(key, e->key)) {
-	    if (rm) {
-		if (prev)
-		    prev->next = e->next;
-		else
-		    obj_root = e->next;
-                e->next = obj_gc_pool;
-                obj_gc_pool = e;
-	    }
-	    pthread_mutex_unlock(&obj_mutex);
-	    return e;
+    entry_t *e = (entry_t*) hash(obj_hash, key, 0, 0);
+    if (e) {
+	if (rm) {
+	    /* it's a bit annoying, to do rm we have to
+	       do a second pass since we don't know whether
+	       to replace or delete until we retrieve
+	       the entry; for performance it would be
+	       nice to keep the address so we don't need
+	       to look it up twice - FIXME */
+	    if (e->next) /* replace with the next entry */
+		hash(obj_hash, key, e->next, 0);
+	    else /* nothing else, just remove */
+		hash(obj_hash, key, 0, 1);
+	    e->next = obj_gc_pool;
+	    obj_gc_pool = e;
 	}
-	prev = e;
-	e = e->next;
+	pthread_mutex_unlock(&obj_mutex);
+	return e;
     }
     pthread_mutex_unlock(&obj_mutex);
     return 0;
@@ -489,6 +501,7 @@ static int init_pt;
 static void do_init() {
     if (!init_pt) {
 	pthread_mutex_init(&obj_mutex, 0);
+	obj_hash = new_hash(1024*128, 0.85);
 	init_pt = 1;
     }
 }
