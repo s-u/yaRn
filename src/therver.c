@@ -303,25 +303,22 @@ hash_elt_t *hash(hash_t *h, const char *key, hash_elt_t *val, int rm);
 static hash_t  *obj_hash;
 static entry_t *obj_gc_pool;
 
-static void obj_add_buf(const char *key, void *data, obj_len_t len) {
-    entry_t *e = (entry_t*) calloc(1, sizeof(entry_t) + strlen(key));
-    strcpy(e->key, key);
-    e->key_ptr = e->key;
-    e->len = len;
-    e->obj = data;
-    pthread_mutex_lock(&obj_mutex);
-    e->next = (entry_t*) hash(obj_hash, key, (hash_elt_t*)e, 0);
-    if (e->next == e) e->next = 0; /* no loops */
-    pthread_mutex_unlock(&obj_mutex);
-}
-
 /* NOTE: the ownership is transferred ! */
 static void obj_add(entry_t *e) {
     pthread_mutex_lock(&obj_mutex);
     e->key_ptr = e->key; /* make sure the object is complete */
     e->next = (entry_t*) hash(obj_hash, e->key, (hash_elt_t*)e, 0);
-    if (e->next == e) e->next = 0; /* no loops */
+    if (e->next == e)
+	e->next = 0; /* no loops */
     pthread_mutex_unlock(&obj_mutex);
+}
+
+static void obj_add_buf(const char *key, void *data, obj_len_t len) {
+    entry_t *e = (entry_t*) calloc(1, sizeof(entry_t) + strlen(key));
+    strcpy(e->key, key);
+    e->len = len;
+    e->obj = data;
+    obj_add(e);
 }
 
 static void obj_gc() {
@@ -338,17 +335,22 @@ static entry_t *obj_get(const char *key, int rm) {
     pthread_mutex_lock(&obj_mutex);
     entry_t *e = (entry_t*) hash(obj_hash, key, 0, 0);
     if (e) {
+	/* we pop from the back
+	   FIXME: this assumes the queues are not too long */
+	entry_t *prev = 0;
+	while (e->next) {
+	    prev = e;
+	    e = e->next;
+	}
 	if (rm) {
-	    /* it's a bit annoying, to do rm we have to
-	       do a second pass since we don't know whether
-	       to replace or delete until we retrieve
-	       the entry; for performance it would be
-	       nice to keep the address so we don't need
-	       to look it up twice - FIXME */
-	    if (e->next) /* replace with the next entry */
-		hash(obj_hash, key, e->next, 0);
-	    else /* nothing else, just remove */
+	    if (prev) /* we're not the root, so only
+			 pointer magic */
+		prev->next = 0;
+	    else
+		/* if we are the root, so
+		   by definition just remove us */
 		hash(obj_hash, key, 0, 1);
+
 	    e->next = obj_gc_pool;
 	    obj_gc_pool = e;
 	}
